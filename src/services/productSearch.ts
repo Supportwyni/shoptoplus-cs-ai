@@ -9,7 +9,21 @@ export class ProductSearchService {
   async searchProducts(query: string, limit: number = 10): Promise<ProductSearchResult> {
     console.log(`🔎 Searching for: "${query}"`);
     
-    // Try exact match first (most reliable)
+    // Extract keywords from query (remove filler words)
+    const keywords = this.extractKeywords(query);
+    console.log(`📝 Extracted keywords: ${keywords.join(', ')}`);
+    
+    // Try each keyword
+    for (const keyword of keywords) {
+      // Try exact match first (most reliable)
+      const exactMatch = await this.exactSearch(keyword, limit);
+      if (exactMatch.products.length > 0) {
+        console.log(`✅ Found ${exactMatch.products.length} products via exact match (keyword: "${keyword}")`);
+        return exactMatch;
+      }
+    }
+    
+    // If no single keyword works, try the full query
     const exactMatch = await this.exactSearch(query, limit);
     if (exactMatch.products.length > 0) {
       console.log(`✅ Found ${exactMatch.products.length} products via exact match`);
@@ -211,6 +225,51 @@ export class ProductSearchService {
       console.error('Fuzzy search exception:', error);
       return { products: [], confidence: 0, searchMethod: 'fuzzy' };
     }
+  }
+
+  /**
+   * Extract meaningful keywords from search query
+   */
+  private extractKeywords(query: string): string[] {
+    // Remove common filler words (English and Chinese)
+    const fillerWords = [
+      'do', 'you', 'have', 'any', 'the', 'a', 'an', 'some', 'show', 'me',
+      'i', 'want', 'need', 'looking', 'for', 'find', 'search',
+      '有', '有沒有', '有無', '想', '要', '需要', '找', '搵', '我想',
+      '可以', '可唔可以', '俾', '畀', '幫', '幫我'
+    ];
+    
+    // Split by spaces and filter
+    let words = query.toLowerCase()
+      .split(/[\s,，]+/)
+      .filter(word => word.length > 1 && !fillerWords.includes(word));
+    
+    // Also add common translations
+    const translations: Record<string, string> = {
+      'water': '水',
+      'beer': '啤酒',
+      'drink': '飲料',
+      'juice': '果汁',
+      'soda': '汽水',
+      'coffee': '咖啡',
+      'tea': '茶',
+      'milk': '奶',
+      'wine': '酒',
+      'bottle': '樽',
+    };
+    
+    // Add translated versions
+    const extraWords: string[] = [];
+    words.forEach(word => {
+      if (translations[word]) {
+        extraWords.push(translations[word]);
+      }
+    });
+    
+    words = [...words, ...extraWords];
+    
+    // If no keywords extracted, use full query
+    return words.length > 0 ? words : [query];
   }
 
   /**

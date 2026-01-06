@@ -126,7 +126,7 @@ export interface AIResponse {
 export interface ProductSearchResult {
   products: Product[];
   confidence: number;
-  searchMethod: 'exact' | 'semantic' | 'alias' | 'fuzzy';
+  searchMethod: 'exact' | 'semantic' | 'alias' | 'fuzzy' | 'sample' | 'none';
 }
 
 export interface ConversationContext {
