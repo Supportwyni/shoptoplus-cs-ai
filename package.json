@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "vercel-build": "tsc",
+    "vercel-build": "npm run build",
     "start": "node dist/index.js",
     "test": "jest",
     "generate-embeddings": "tsx src/scripts/generateEmbeddings.ts"
