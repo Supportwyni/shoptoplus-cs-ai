@@ -7,48 +7,82 @@ export class ProductSearchService {
    * Search for products using multiple strategies
    */
   async searchProducts(query: string, limit: number = 10): Promise<ProductSearchResult> {
-    // Try exact match first
+    console.log(`🔎 Searching for: "${query}"`);
+    
+    // Try exact match first (most reliable)
     const exactMatch = await this.exactSearch(query, limit);
     if (exactMatch.products.length > 0) {
+      console.log(`✅ Found ${exactMatch.products.length} products via exact match`);
       return exactMatch;
     }
 
     // Try alias search
     const aliasMatch = await this.aliasSearch(query, limit);
     if (aliasMatch.products.length > 0) {
+      console.log(`✅ Found ${aliasMatch.products.length} products via alias search`);
       return aliasMatch;
     }
 
-    // Try semantic search with embeddings
-    const semanticMatch = await this.semanticSearch(query, limit);
-    if (semanticMatch.products.length > 0) {
-      return semanticMatch;
+    // Try semantic search with embeddings (if available)
+    try {
+      const semanticMatch = await this.semanticSearch(query, limit);
+      if (semanticMatch.products.length > 0) {
+        console.log(`✅ Found ${semanticMatch.products.length} products via semantic search`);
+        return semanticMatch;
+      }
+    } catch (error) {
+      console.log('⚠️ Semantic search unavailable, continuing with fallback');
     }
 
-    // Fallback to fuzzy text search
-    return await this.fuzzySearch(query, limit);
+    // Try fuzzy text search
+    const fuzzyMatch = await this.fuzzySearch(query, limit);
+    if (fuzzyMatch.products.length > 0) {
+      console.log(`✅ Found ${fuzzyMatch.products.length} products via fuzzy search`);
+      return fuzzyMatch;
+    }
+    
+    // Last resort: get recent/popular products
+    console.log('⚠️ No products found with search, trying to get sample products');
+    const sampleProducts = await this.getSampleProducts(limit);
+    
+    if (sampleProducts.products.length > 0) {
+      console.log(`✅ Showing ${sampleProducts.products.length} sample products instead`);
+      return {
+        ...sampleProducts,
+        confidence: 0.3, // Low confidence since not matching query
+      };
+    }
+
+    console.log('❌ No products found at all');
+    return { products: [], confidence: 0, searchMethod: 'none' };
   }
 
   /**
    * Exact match by product code or name
    */
   private async exactSearch(query: string, limit: number): Promise<ProductSearchResult> {
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .or(`product_code.ilike.%${query}%,product_name_chinese.ilike.%${query}%,product_name_english.ilike.%${query}%`)
-      .limit(limit);
+    try {
+      const searchTerm = `%${query}%`;
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .or(`product_code.ilike.${searchTerm},product_name_chinese.ilike.${searchTerm},product_name_english.ilike.${searchTerm}`)
+        .limit(limit);
 
-    if (error) {
-      console.error('Exact search error:', error);
+      if (error) {
+        console.error('Exact search error:', error);
+        return { products: [], confidence: 0, searchMethod: 'exact' };
+      }
+
+      return {
+        products: data || [],
+        confidence: data && data.length > 0 ? 0.95 : 0,
+        searchMethod: 'exact',
+      };
+    } catch (error) {
+      console.error('Exact search exception:', error);
       return { products: [], confidence: 0, searchMethod: 'exact' };
     }
-
-    return {
-      products: data || [],
-      confidence: data && data.length > 0 ? 0.95 : 0,
-      searchMethod: 'exact',
-    };
   }
 
   /**
@@ -136,25 +170,73 @@ export class ProductSearchService {
    * Fuzzy text search as fallback
    */
   private async fuzzySearch(query: string, limit: number): Promise<ProductSearchResult> {
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .textSearch('search_text', query, {
-        type: 'websearch',
-        config: 'simple',
-      })
-      .limit(limit);
+    try {
+      // Try text search first if search_text column exists
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .textSearch('search_text', query, {
+          type: 'websearch',
+          config: 'simple',
+        })
+        .limit(limit);
 
-    if (error) {
-      console.error('Fuzzy search error:', error);
+      if (!error && data && data.length > 0) {
+        return {
+          products: data,
+          confidence: 0.6,
+          searchMethod: 'fuzzy',
+        };
+      }
+
+      // If text search fails or returns nothing, try broader LIKE search
+      const searchTerm = `%${query}%`;
+      const { data: likeData, error: likeError } = await supabase
+        .from('products')
+        .select('*')
+        .ilike('search_text', searchTerm)
+        .limit(limit);
+
+      if (likeError) {
+        console.error('Fuzzy search error:', likeError);
+        return { products: [], confidence: 0, searchMethod: 'fuzzy' };
+      }
+
+      return {
+        products: likeData || [],
+        confidence: likeData && likeData.length > 0 ? 0.5 : 0,
+        searchMethod: 'fuzzy',
+      };
+    } catch (error) {
+      console.error('Fuzzy search exception:', error);
       return { products: [], confidence: 0, searchMethod: 'fuzzy' };
     }
+  }
 
-    return {
-      products: data || [],
-      confidence: data && data.length > 0 ? 0.6 : 0,
-      searchMethod: 'fuzzy',
-    };
+  /**
+   * Get sample products when search returns nothing
+   */
+  private async getSampleProducts(limit: number): Promise<ProductSearchResult> {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .limit(limit);
+
+      if (error) {
+        console.error('Sample products error:', error);
+        return { products: [], confidence: 0, searchMethod: 'sample' };
+      }
+
+      return {
+        products: data || [],
+        confidence: 0.2,
+        searchMethod: 'sample',
+      };
+    } catch (error) {
+      console.error('Sample products exception:', error);
+      return { products: [], confidence: 0, searchMethod: 'sample' };
+    }
   }
 
   /**

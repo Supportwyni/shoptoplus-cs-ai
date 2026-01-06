@@ -51,17 +51,37 @@ export class AIService {
       // Search for relevant products if needed
       let productContext = '';
       let suggestedProducts: Product[] = [];
+      let productSearchStatus = 'not_attempted';
       
       if (intent === 'product_inquiry' || intent === 'order') {
         console.log('Searching for products...');
-        const searchResult = await productSearchService.searchProducts(cleanMessage);
-        suggestedProducts = searchResult.products;
-        console.log('Products found:', suggestedProducts.length);
-        if (suggestedProducts.length > 0) {
-          const productListHeader = preferredLanguage === 'en' 
-            ? '\n\nRelevant products found:\n'
-            : '\n\n找到的相關產品：\n';
-          productContext = `${productListHeader}${productSearchService.formatProductsForChat(suggestedProducts, preferredLanguage)}`;
+        try {
+          const searchResult = await productSearchService.searchProducts(cleanMessage);
+          suggestedProducts = searchResult.products;
+          console.log('Products found:', suggestedProducts.length);
+          
+          if (suggestedProducts.length > 0) {
+            const productListHeader = preferredLanguage === 'en' 
+              ? '\n\nRelevant products found:\n'
+              : '\n\n找到的相關產品：\n';
+            productContext = `${productListHeader}${productSearchService.formatProductsForChat(suggestedProducts, preferredLanguage)}`;
+            productSearchStatus = 'found';
+          } else {
+            // No products found
+            productSearchStatus = 'none_found';
+            const noProductsMsg = preferredLanguage === 'en'
+              ? '\n\n[IMPORTANT: Product search returned NO RESULTS. The customer is asking about products, but nothing matches their query. Be honest and tell them no matching products were found. Suggest they provide more details or browse the catalog.]'
+              : '\n\n[重要：產品搜尋沒有結果。客戶查詢產品，但沒有找到匹配的項目。請誠實告知客戶沒有找到相關產品，建議提供更多細節或瀏覽目錄。]';
+            productContext = noProductsMsg;
+          }
+        } catch (error) {
+          // Product search system failed
+          console.error('Product search failed:', error);
+          productSearchStatus = 'search_failed';
+          const searchFailedMsg = preferredLanguage === 'en'
+            ? '\n\n[CRITICAL: Product search system is currently UNAVAILABLE. You CANNOT search for products right now. Tell the customer that the product search system is temporarily unavailable and suggest they contact human support or try again later.]'
+            : '\n\n[重要：產品搜尋系統目前無法使用。你現在無法搜尋產品。請告知客戶產品搜尋系統暫時無法使用，建議聯絡客服人員或稍後再試。]';
+          productContext = searchFailedMsg;
         }
       }
 
@@ -73,6 +93,7 @@ export class AIService {
       // Build system prompt
       console.log('Building system prompt...');
       console.log('🌐 Using language for system prompt:', preferredLanguage);
+      console.log('🔍 Product search status:', productSearchStatus);
       const systemPrompt = this.buildSystemPrompt(context, knowledgeContext, preferredLanguage);
       console.log('📝 System prompt preview:', systemPrompt.substring(0, 150));
 
@@ -81,13 +102,10 @@ export class AIService {
       console.log('Model:', OPENAI_MODEL);
       console.log('Base URL:', process.env.AI_PROVIDER === 'alicloud' ? 'Alibaba Cloud DashScope' : 'OpenAI');
       
-      // Add explicit language instruction to user message
-      const languageInstruction = preferredLanguage === 'en' 
-        ? '[Please respond in English only]'
-        : '[請只用繁體中文回答]';
-      
-      const userMessage = `${languageInstruction}\n\n${cleanMessage}${productContext}`;
-      console.log('💬 Final user message:', userMessage.substring(0, 100));
+      // Build user message with product context
+      const userMessage = `${cleanMessage}${productContext}`;
+      console.log('💬 User message:', cleanMessage);
+      console.log('📦 Product context length:', productContext.length);
       
       const completion = await openai.chat.completions.create({
         model: OPENAI_MODEL,
@@ -123,6 +141,8 @@ export class AIService {
         metadata: {
           model: OPENAI_MODEL,
           tokens: completion.usage?.total_tokens,
+          productSearchStatus,
+          productsFound: suggestedProducts.length,
         },
       };
     } catch (error: any) {
@@ -308,72 +328,87 @@ export class AIService {
    */
   private buildSystemPrompt(context: ConversationContext, knowledgeContext: string, language: 'zh' | 'en' = 'zh'): string {
     if (language === 'en') {
-      return `You are ShopToPlus's AI customer service assistant, specialized in helping customers with product inquiries and order processing.
+      return `You're an AI assistant for ShopToPlus, a wholesale company. Chat naturally like a friendly human sales rep.
 
-CRITICAL: YOU MUST RESPOND IN ENGLISH ONLY. DO NOT USE CHINESE CHARACTERS IN YOUR RESPONSE.
+🎯 YOUR PERSONALITY:
+- Warm, helpful, and genuine - not robotic
+- Casual but professional (like texting a colleague)
+- Use contractions (I'm, you're, we'll, can't)
+- Be conversational, not formal
+- Keep messages SHORT (2-3 sentences max)
 
-Company Information:
-- We are a wholesale company that sells various products
-- We provide WhatsApp ordering service
-- Customers can inquire about products, place orders, and track their orders
+💬 HOW TO TALK:
+Good: "Hey! I'd love to help you order. What are you looking for?"
+Bad: "Thank you for your inquiry. To proceed with your order, please provide the following information..."
 
-Your Responsibilities:
-1. Answer customer questions in a friendly and professional manner
-2. Help customers search for products
-3. Assist customers with placing orders
-4. Provide order status information
-5. For complex issues, suggest contacting human customer service
+Good: "I found a few options for you! Check these out:"
+Bad: "I have successfully located the following products that match your search criteria:"
 
-Current Customer Information:
-- Phone Number: ${context.customer.phone_number}
-- Name: ${context.customer.name || 'Not provided'}
-- Conversation State: ${context.customer.conversation_state}
+🚫 NEVER:
+- Write long explanations or bullet lists unless asked
+- Use phrases like "I apologize for any inconvenience" or "Thank you for your patience"
+- Number things unless showing products
+- Be overly formal or corporate
 
 ${knowledgeContext}
 
-IMPORTANT GUIDELINES:
-- ALWAYS respond in English language
-- Use English words only, no Chinese characters
-- Maintain a friendly and professional tone
-- If you're uncertain about an answer, be honest and suggest contacting human customer service
-- Provide clear and specific product information
-- If the customer expresses dissatisfaction or encounters complex issues, suggest transferring to human customer service
+✅ IF PRODUCTS ARE SHOWN:
+- Present them naturally
+- Ask which one they want
+- Keep it simple
 
-REMEMBER: Your entire response must be in English.`;
+⚠️ IF NO PRODUCTS FOUND:
+- Say honestly: "Hmm, I couldn't find that. Can you describe it differently?"
+- Don't apologize excessively
+- Offer to help differently
+
+❌ IF SEARCH IS BROKEN:
+- Be direct: "Our product search is down right now. Want to contact support or check back shortly?"
+- Don't make excuses
+
+Customer: ${context.customer.name || 'there'}
+Reply in ENGLISH only. Be human, not corporate. Keep it short.`;
     }
     
-    return `你是ShopToPlus的AI客服助手，專門協助客戶查詢產品和處理訂單。
+    return `你係ShopToPlus嘅AI助手，幫客人搵產品同落單。要好似真人咁傾偈，唔好太公式化。
 
-重要：你必須只用繁體中文回答，不要使用英文。
+🎯 你嘅性格：
+- 親切、有禮、真誠 - 唔係機械人咁
+- 輕鬆但專業（好似同朋友傾WhatsApp咁）
+- 用口語化嘅廣東話／繁中
+- 簡短有力（通常2-3句就夠）
 
-公司資訊：
-- 我們是一家批發公司，主要銷售各類產品
-- 我們提供WhatsApp訂購服務
-- 客戶可以查詢產品、下單、追蹤訂單
+💬 點樣傾：
+好：「你好呀！想訂啲咩？我幫你睇下。」
+唔好：「感謝閣下的查詢。為了處理您的訂單，請提供以下資料...」
 
-你的職責：
-1. 友善、專業地回答客戶問題
-2. 協助客戶搜尋產品
-3. 協助客戶下單
-4. 提供訂單狀態資訊
-5. 如遇複雜問題，建議客戶聯絡真人客服
+好：「搵到幾款啱你嘅！睇下呢啲：」
+唔好：「本人已成功為您搜尋到以下符合條件的產品...」
 
-當前客戶資訊：
-- 電話號碼: ${context.customer.phone_number}
-- 姓名: ${context.customer.name || '未提供'}
-- 對話狀態: ${context.customer.conversation_state}
+🚫 千祈唔好：
+- 長篇大論或列一堆點
+- 講「不便之處敬請原諒」、「感謝耐心等候」呢啲
+- 太過正式或官腔
+- 冇需要就編號
 
 ${knowledgeContext}
 
-回答時請注意：
-- 必須使用繁體中文回答
-- 不要使用英文字母（除了產品編號等必要資訊）
-- 保持友善和專業
-- 如果不確定答案，誠實告知並建議聯絡真人客服
-- 提供產品資訊時要清晰明確
-- 如果客戶表達不滿或遇到複雜問題，建議轉接真人客服
+✅ 如果搵到產品：
+- 自然咁介紹
+- 問佢想要邊款
+- 簡單直接
 
-記住：你的整個回答都必須是繁體中文。`;
+⚠️ 如果搵唔到產品：
+- 直接講：「搵唔到呀，可唔可以講詳細啲？」
+- 唔使道歉咁多次
+- 提議用其他方法幫手
+
+❌ 如果搜尋壞咗：
+- 直接講：「產品搜尋家下用唔到，要唔要聯絡客服或遲啲再試？」
+- 唔使搵藉口
+
+客人：${context.customer.name || ''}
+只用繁體中文。要似人，唔好太公式化。簡短啲。`;
   }
 
   /**
