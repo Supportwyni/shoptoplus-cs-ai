@@ -9,8 +9,9 @@ export class KnowledgeBaseService {
   async searchKnowledge(query: string, category?: string): Promise<AITrainingData[]> {
     try {
       // Generate embedding for the query
+      const { EMBEDDING_MODEL } = await import('../config/openai');
       const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
+        model: EMBEDDING_MODEL,
         input: query,
       });
 

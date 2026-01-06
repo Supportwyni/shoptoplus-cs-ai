@@ -100,8 +100,9 @@ export class ProductSearchService {
   private async semanticSearch(query: string, limit: number): Promise<ProductSearchResult> {
     try {
       // Generate embedding for the query
+      const { EMBEDDING_MODEL } = await import('../config/openai');
       const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
+        model: EMBEDDING_MODEL,
         input: query,
       });
 
@@ -194,32 +195,55 @@ export class ProductSearchService {
   /**
    * Format products for display in chat
    */
-  formatProductsForChat(products: Product[]): string {
+  formatProductsForChat(products: Product[], language: 'zh' | 'en' = 'zh'): string {
     if (products.length === 0) {
-      return '抱歉，我找不到相關的產品。請提供更多資訊或聯絡我們的客服人員。';
+      return language === 'en' 
+        ? 'Sorry, I could not find any related products. Please provide more information or contact our customer service.'
+        : '抱歉，我找不到相關的產品。請提供更多資訊或聯絡我們的客服人員。';
     }
 
-    let message = `我找到了以下產品：\n\n`;
+    let message = language === 'en' 
+      ? `I found the following products:\n\n`
+      : `我找到了以下產品：\n\n`;
     
     products.forEach((product, index) => {
-      message += `${index + 1}. **${product.product_name_chinese}**\n`;
-      if (product.product_name_english) {
-        message += `   ${product.product_name_english}\n`;
-      }
-      message += `   產品編號: ${product.product_code}\n`;
-      if (product.size) {
-        message += `   規格: ${product.size}\n`;
-      }
-      if (product.box_specification) {
-        message += `   箱規: ${product.box_specification}\n`;
-      }
-      if (product.wholesale_price) {
-        message += `   批發價: HKD $${product.wholesale_price}\n`;
+      if (language === 'en') {
+        message += `${index + 1}. **${product.product_name_english || product.product_name_chinese}**\n`;
+        if (product.product_name_chinese && product.product_name_english) {
+          message += `   ${product.product_name_chinese}\n`;
+        }
+        message += `   Product Code: ${product.product_code}\n`;
+        if (product.size) {
+          message += `   Size: ${product.size}\n`;
+        }
+        if (product.box_specification) {
+          message += `   Box Spec: ${product.box_specification}\n`;
+        }
+        if (product.wholesale_price) {
+          message += `   Wholesale Price: HKD $${product.wholesale_price}\n`;
+        }
+      } else {
+        message += `${index + 1}. **${product.product_name_chinese}**\n`;
+        if (product.product_name_english) {
+          message += `   ${product.product_name_english}\n`;
+        }
+        message += `   產品編號: ${product.product_code}\n`;
+        if (product.size) {
+          message += `   規格: ${product.size}\n`;
+        }
+        if (product.box_specification) {
+          message += `   箱規: ${product.box_specification}\n`;
+        }
+        if (product.wholesale_price) {
+          message += `   批發價: HKD $${product.wholesale_price}\n`;
+        }
       }
       message += `\n`;
     });
 
-    message += `如需訂購或了解更多資訊，請告訴我產品編號和數量。`;
+    message += language === 'en'
+      ? `To place an order or learn more, please tell me the product code and quantity.`
+      : `如需訂購或了解更多資訊，請告訴我產品編號和數量。`;
     
     return message;
   }

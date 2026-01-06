@@ -134,5 +134,6 @@ export interface ConversationContext {
   recentMessages: Message[];
   currentSession: ConversationSession;
   orderInProgress?: Partial<Order>;
+  preferredLanguage?: 'zh' | 'en';
 }
 

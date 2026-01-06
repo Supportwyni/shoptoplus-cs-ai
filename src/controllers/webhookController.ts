@@ -60,24 +60,40 @@ export class WebhookController {
       await conversationManager.createSessionProtection(phoneNumber, messageId);
 
       try {
+        console.log('=== PROCESSING MESSAGE ===');
+        console.log('Phone:', phoneNumber);
+        console.log('Message:', message);
+        
         // Mark message as read
         await whatsappService.markAsRead(messageId);
+        console.log('✓ Marked as read');
 
         // Get or create customer
+        console.log('Getting/creating customer...');
         const customer = await conversationManager.getOrCreateCustomer(phoneNumber);
+        console.log('✓ Customer:', customer.id);
 
         // Save incoming message
+        console.log('Saving incoming message...');
         await conversationManager.saveIncomingMessage(
           customer,
           message,
           messageType as any
         );
+        console.log('✓ Message saved');
 
         // Build conversation context
+        console.log('Building conversation context...');
         const context = await conversationManager.buildContext(customer);
+        console.log('✓ Context built');
 
         // Process message with AI
+        console.log('Processing with AI...');
+        console.log('AI Provider:', process.env.AI_PROVIDER);
+        console.log('AI Model:', process.env.AI_MODEL);
         const aiResponse = await aiService.processMessage(message, context);
+        console.log('✓ AI Response received');
+        console.log('Response:', aiResponse.response.substring(0, 100) + '...');
 
         // Calculate response time
         const responseTime = Date.now() - startTime;
@@ -133,8 +149,15 @@ export class WebhookController {
         // Release session protection
         await conversationManager.releaseSessionProtection(phoneNumber);
       }
-    } catch (error: any) {
-      console.error('Webhook processing error:', error);
+      } catch (error: any) {
+      console.error('=== WEBHOOK PROCESSING ERROR ===');
+      console.error('Error Type:', error.constructor.name);
+      console.error('Error Message:', error.message);
+      console.error('Error Code:', error.code);
+      console.error('Error Status:', error.status);
+      console.error('Full Error:', error);
+      console.error('Stack Trace:', error.stack);
+      console.error('================================');
 
       // Log error
       await this.logWebhookEvent(

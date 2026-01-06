@@ -191,7 +191,33 @@ export class ConversationManager {
       customer,
       recentMessages,
       currentSession: session,
+      preferredLanguage: customer.metadata?.language_preference || 'zh',
     };
+  }
+
+  /**
+   * Update customer language preference
+   */
+  async updateLanguagePreference(
+    phoneNumber: string,
+    language: 'zh' | 'en'
+  ): Promise<void> {
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('metadata')
+      .eq('phone_number', phoneNumber)
+      .single();
+
+    const metadata = customer?.metadata || {};
+    metadata.language_preference = language;
+
+    await supabase
+      .from('customers')
+      .update({ 
+        metadata,
+        updated_at: new Date().toISOString() 
+      })
+      .eq('phone_number', phoneNumber);
   }
 
   /**
